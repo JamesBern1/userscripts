@@ -110,82 +110,77 @@ List Price - ${data.ListPrice||''}`;
 }
 
   /* ------------ SIM COPY PAGE ------------ */
-  function onSIMCopy() {
-    const key=q('tmk');
-    const payload=key?GM_getValue(key):null;
-    if(!payload){console.warn('[TM] No payload for SIM copy page');return;}
+  function onSIMCopy () {
+  const key = q('tmk');
+  const payload = key ? GM_getValue(key) : null;
+  if (!payload) { console.warn('[TM] No payload for SIM copy page'); return; }
 
-    // Choose radio + Confirm & set pending flag
-    waitFor(()=>document.querySelectorAll('input[type="radio"]').length>=2,()=>{
-      const radios=document.querySelectorAll('input[type="radio"]');
-      const r=radios[RADIO_INDEX];
-      if(r){r.click();r.dispatchEvent(new Event('change',{bubbles:true}));}
-      const confirm=[...document.querySelectorAll('button')].find(b=>/confirm/i.test(b.textContent||''));
-      if(confirm){
-        armPost(); // mark right away
-        confirm.click();
+  /* --- choose radio & click Confirm ---------------------------------- */
+  waitFor(() => document.querySelectorAll('input[type="radio"]').length >= 2, () => {
+    const radios  = document.querySelectorAll('input[type="radio"]');
+    const r       = radios[RADIO_INDEX];
+    if (r) { r.click(); r.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    const confirm = [...document.querySelectorAll('button')]
+                      .find(b => /confirm/i.test(b.textContent || ''));
+    if (confirm) { armPost(); confirm.click(); }
+  });
+
+  /* --- fill & keep filled -------------------------------------------- */
+  waitFor(() => document.getElementById(SIM_TITLE_ID) && document.getElementById(SIM_DESC_ID), () => {
+    const t = document.getElementById(SIM_TITLE_ID);
+    const d = document.getElementById(SIM_DESC_ID);
+
+    /* snapshot the blank templates BEFORE we overwrite */
+    const TEMPLATE_TITLE = t.value.trim();                       //  ← new
+    const TEMPLATE_DESC  = d.value.replace(/\s+/g, ' ').trim();  //  (existing)
+
+    /* initial write */
+    nativeSet(t, payload.title || '');
+    nativeSet(d, payload.desc  || '');
+
+    let stopTitle  = false;
+    let stopDesc   = false;
+    const deadline = Date.now() + REFILL_MS;
+
+    const stopLoop = id => { clearInterval(id); console.log('[TM] Refill loop ended'); };
+
+    /* stop when user types */
+    t.addEventListener('input', e => { if (e.isTrusted) stopTitle = true; }, { once: true });
+    d.addEventListener('input', e => { if (e.isTrusted) stopDesc  = true; }, { once: true });
+
+    const loop = setInterval(() => {
+      if (Date.now() > deadline) return stopLoop(loop);
+
+      /* -------- Title -------- */
+      const titleLooksTemplate = !t.value || t.value.trim() === TEMPLATE_TITLE;
+      if (!stopTitle && titleLooksTemplate) {
+        nativeSet(t, payload.title || '');
       }
-    });
 
-    // fill & keep filled (independent stop flags for title & description) //NOTES THAT T TICKET PAGE HAS A RELOAD FUNCTION YOU HAVE TO OVERCOME OR WHATEVER YOU PASTE GETS ERASED
-    waitFor(() => document.getElementById(SIM_TITLE_ID) && document.getElementById(SIM_DESC_ID), () => {
-      const t = document.getElementById(SIM_TITLE_ID);
-      const d = document.getElementById(SIM_DESC_ID);
+      /* -------- Description -- */
+      const currentTrim   = d.value.replace(/\s+/g, ' ').trim();
+      const descLooksTpl  = currentTrim === TEMPLATE_DESC || currentTrim.length < 15;
+      if (!stopDesc && descLooksTpl) {
+        nativeSet(d, payload.desc || '');
+      }
 
-      // Snapshot the blank template before we write
-      const TEMPLATE_DESC = d.value.replace(/\s+/g, ' ').trim();
+      if (stopTitle && stopDesc) stopLoop(loop);
+    }, REFILL_INT);
+  });
 
-      // Initial write
-      nativeSet(t, payload.title || '');
-      nativeSet(d, payload.desc  || '');
+  /* --- re‑arm when user clicks “Create ticket” ------------------------ */
+  const findCreateBtn = () =>
+    [...document.querySelectorAll('button')].find(b => /create ticket/i.test(b.textContent || ''));
 
-      let stopTitle = false;
-      let stopDesc  = false;
-      const deadline = Date.now() + REFILL_MS;
+  waitFor(findCreateBtn, () => {
+    const btn = findCreateBtn();
+    if (btn) btn.addEventListener('click', armPost, { once: true });
+  });
 
-      let loop = null;
-      const stopLoop = () => {
-        if (loop) clearInterval(loop);
-        loop = null;
-        console.log('[TM] Refill loop ended');
-      };
-
-      // Stop per field on trusted user input
-      t.addEventListener('input', e => { if (e.isTrusted) stopTitle = true; }, { once: true });
-      d.addEventListener('input', e => { if (e.isTrusted) stopDesc  = true; }, { once: true });
-
-      loop = setInterval(() => {
-        if (Date.now() > deadline) return stopLoop();
-
-        // Title
-        if (!stopTitle && (!t.value || t.value === 'Master Pack - Template')) {
-          nativeSet(t, payload.title || '');
-        }
-
-        // Description
-        const currentTrim = d.value.replace(/\s+/g, ' ').trim();
-        const looksTemplate = currentTrim === TEMPLATE_DESC || currentTrim.length < 15;
-        if (!stopDesc && (!d.value || looksTemplate)) {
-          nativeSet(d, payload.desc || '');
-        }
-
-        if (stopTitle && stopDesc) stopLoop();
-      }, REFILL_INT);
-    });
-
-    // Re‑arm when user actually clicks "Create ticket"
-    const findCreateBtn = () =>
-      [...document.querySelectorAll('button')].find(b => /create ticket/i.test(b.textContent || ''));
-
-    waitFor(findCreateBtn, () => {
-      const btn = findCreateBtn();
-      if (btn) btn.addEventListener('click', armPost, { once: true });
-    });
-
-    // cleanup stored payload key
-    setTimeout(()=>{key&&GM_deleteValue(key);},30000);
-  }
-
+  /* cleanup stored payload */
+  setTimeout(() => { if (key) GM_deleteValue(key); }, 30_000);
+}
   /* ------------ SIM TICKET VIEW (Slack Post) ------------ */
   function sendToSlack(title, link){
     if (!SLACK_WEBHOOK) return;
