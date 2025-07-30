@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SIM Ticket Autofill + Slack Post
 // @downloadURL https://portal.mycompany.net/userscripts/sim-autofill.user.js
-// @updateURL   https://portal.mycompany.net/userscripts/sim-autofill.user.js
-// @namespace    amazon.internal.sim.autofill
+// @downloadURL https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
+// @updateURL   https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
 // @version      1.5
 // @description  FCResearch → SIM autofill → post ticket to Slack via Workflow webhook
 // @match        https://fcresearch-na.aka.amazon.com/*
