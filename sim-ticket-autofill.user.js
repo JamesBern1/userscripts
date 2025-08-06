@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         SIM Ticket Autofill + Slack Post
-// @downloadURL https://portal.mycompany.net/userscripts/sim-autofill.user.js
-// @downloadURL https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
-// @updateURL   https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
-// @version      1.5
+// @downloadURL  https://portal.mycompany.net/userscripts/sim-autofill.user.js
+// @downloadURL  https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
+// @updateURL    https://raw.githubusercontent.com/JamesBern1/userscripts/main/sim-ticket-autofill.user.js
+// @version      1.5.1
 // @description  FCResearch → SIM autofill → post ticket to Slack via Workflow webhook
 // @match        https://fcresearch-na.aka.amazon.com/*
 // @match        https://t.corp.amazon.com/*
@@ -28,9 +28,9 @@
   const REFILL_MS     = 6000;              // keep refilling for up to 6s
   const REFILL_INT    = 150;               // every 150ms
 
-  const SLACK_WEBHOOK  = 'https://hooks.slack.com/triggers/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'; // <— paste your Workflow webhook
-  const POST_WINDOW_MS = 15 * 60 * 1000;          // 15 min window
-  const PENDING_KEY    = 'tm_postNext';           // flag we set before submit
+  const SLACK_WEBHOOK  = 'https://hooks.slack.com/triggers/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';
+  const POST_WINDOW_MS = 90 * 1000;                // 1.5 min window
+  const PENDING_KEY    = 'tm_postNext_key';         // stores template-key while armed
 
   /* ------------ UTIL ------------ */
   const waitFor = (test, cb, int=200, max=60) => {
@@ -45,42 +45,39 @@
   };
   const keyGen = ()=>`tm_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const q = k => new URLSearchParams(location.search).get(k);
-  const armPost = () => {
-    GM_setValue(PENDING_KEY, Date.now());
-    console.log('[TM] Armed Slack post');
+  const armPost = tplKey => {
+    GM_setValue(PENDING_KEY, String(tplKey));
+    console.log('[TM] Armed Slack post for', tplKey);
   };
 
   /* ------------ FC RESEARCH PAGE ------------ */
-function onFC() {
-  // Common button styling
-  GM_addStyle(`
-    .tm-btn {
-      position:fixed; right:20px; z-index:99999;
-      background:#ff9900;color:#fff;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.3);
-      padding:8px 12px;font:12px/1 Arial; cursor:pointer;
-    }
-    .tm-btn:hover { background:#e88a00 }
-    #tm-btn-broken { top:60px }   /* second button lower */
-    #tm-btn-master { top:20px }
-  `);
+  function onFC() {
+    GM_addStyle(`
+      .tm-btn {
+        position:fixed; right:20px; z-index:99999;
+        background:#ff9900;color:#fff;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,.3);
+        padding:8px 12px;font:12px/1 Arial; cursor:pointer;
+      }
+      .tm-btn:hover { background:#e88a00 }
+      #tm-btn-broken { top:60px }
+      #tm-btn-master { top:20px }
+    `);
 
-  // Utility to create a button
-  const makeBtn = (id,text,handler) => {
-    const b=document.createElement('div');
-    b.id=id; b.className='tm-btn'; b.textContent=text; b.onclick=handler;
-    document.body.appendChild(b);
-  };
-
-  // Shared code to open a SIM copy page
-  const createTicket = (templateId, titlePrefix) => {
-    const rows=[...document.querySelectorAll('table tr')];
-    const getVal=label=>{
-      const row=rows.find(tr=>tr.cells&&tr.cells[0]&&tr.cells[0].textContent.trim().toLowerCase()===label.toLowerCase());
-      return row?(row.cells[1]?.innerText||'').trim().replace(/\s+/g,' '):'';
+    const makeBtn = (id,text,handler) => {
+      const b=document.createElement('div');
+      b.id=id; b.className='tm-btn'; b.textContent=text; b.onclick=handler;
+      document.body.appendChild(b);
     };
-    const data=Object.fromEntries(FIELDS.map(f=>[f.replace(/\s+/g,''),getVal(f)]));
 
-    const desc=`ASIN - ${data.ASIN||''}
+    const createTicket = (templateId, titlePrefix) => {
+      const rows=[...document.querySelectorAll('table tr')];
+      const getVal=label=>{
+        const row=rows.find(tr=>tr.cells&&tr.cells[0]&&tr.cells[0].textContent.trim().toLowerCase()===label.toLowerCase());
+        return row?(row.cells[1]?.innerText||'').trim().replace(/\s+/g,' '):'';
+      };
+      const data=Object.fromEntries(FIELDS.map(f=>[f.replace(/\s+/g,''),getVal(f)]));
+
+      const desc=`ASIN - ${data.ASIN||''}
 Title - ${data.Title||''}
 Binding - ${data.Binding||''}
 Publisher - ${data.Publisher||''}
@@ -89,109 +86,83 @@ Weight - ${data.Weight||''}
 Dimensions - ${data.Dimensions||''}
 List Price - ${data.ListPrice||''}`;
 
-    const payload={
-      title:`${titlePrefix}${data.ASIN||''}`,
-      desc
+      const payload={ title:`${titlePrefix}${data.ASIN||''}`, desc };
+      const key=keyGen();
+      GM_setValue(key,payload);                      // store payload
+      armPost(key);                                  // arm with this key
+      const url=`https://t.corp.amazon.com/create/copy/${templateId}?tmk=${encodeURIComponent(key)}`;
+      window.open(url,'_blank');
     };
-    const key=keyGen();
-    GM_setValue(key,payload);
-    window.open(`https://t.corp.amazon.com/create/copy/${templateId}?tmk=${encodeURIComponent(key)}`,'_blank');
-  };
 
-  // MasterPack button
-  makeBtn('tm-btn-master','MasterPack Ticket', () =>
-    createTicket('V1861702570','Master Pack - ')
-  );
-
-  // BrokenSet button
-  makeBtn('tm-btn-broken','BrokenSet Ticket', () =>
-    createTicket('V1879253931','Broken Set - ')
-  );
-}
+    makeBtn('tm-btn-master','MasterPack Ticket', () =>
+      createTicket('V1861702570','Master Pack - ')
+    );
+    makeBtn('tm-btn-broken','BrokenSet Ticket', () =>
+      createTicket('V1879253931','Broken Set - ')
+    );
+  }
 
   /* ------------ SIM COPY PAGE ------------ */
   function onSIMCopy () {
-  const key = q('tmk');
-  const payload = key ? GM_getValue(key) : null;
-  if (!payload) { console.warn('[TM] No payload for SIM copy page'); return; }
+    const key = q('tmk');
+    const payload = key ? GM_getValue(key) : null;
+    if (!payload) { console.warn('[TM] No payload for SIM copy page'); return; }
 
-  /* --- choose radio & click Confirm ---------------------------------- */
-  waitFor(() => document.querySelectorAll('input[type="radio"]').length >= 2, () => {
-    const radios  = document.querySelectorAll('input[type="radio"]');
-    const r       = radios[RADIO_INDEX];
-    if (r) { r.click(); r.dispatchEvent(new Event('change', { bubbles: true })); }
+    waitFor(() => document.querySelectorAll('input[type="radio"]').length >= 2, () => {
+      const radios=document.querySelectorAll('input[type="radio"]');
+      const r=radios[RADIO_INDEX];
+      if (r) { r.click(); r.dispatchEvent(new Event('change',{bubbles:true})); }
+      const confirm=[...document.querySelectorAll('button')].find(b=>/confirm/i.test(b.textContent||''));
+      if (confirm) confirm.click();           // NO arming here now
+    });
 
-    const confirm = [...document.querySelectorAll('button')]
-                      .find(b => /confirm/i.test(b.textContent || ''));
-    if (confirm) { armPost(); confirm.click(); }
-  });
+    waitFor(() => document.getElementById(SIM_TITLE_ID) && document.getElementById(SIM_DESC_ID), () => {
+      const t=document.getElementById(SIM_TITLE_ID);
+      const d=document.getElementById(SIM_DESC_ID);
 
-  /* --- fill & keep filled -------------------------------------------- */
-  waitFor(() => document.getElementById(SIM_TITLE_ID) && document.getElementById(SIM_DESC_ID), () => {
-    const t = document.getElementById(SIM_TITLE_ID);
-    const d = document.getElementById(SIM_DESC_ID);
+      const TEMPLATE_TITLE=t.value.trim();
+      const TEMPLATE_DESC =d.value.replace(/\s+/g,' ').trim();
 
-    /* snapshot the blank templates BEFORE we overwrite */
-    const TEMPLATE_TITLE = t.value.trim();                       //  ← new
-    const TEMPLATE_DESC  = d.value.replace(/\s+/g, ' ').trim();  //  (existing)
+      nativeSet(t,payload.title||'');
+      nativeSet(d,payload.desc ||'');
 
-    /* initial write */
-    nativeSet(t, payload.title || '');
-    nativeSet(d, payload.desc  || '');
+      let stopTitle=false, stopDesc=false;
+      const deadline=Date.now()+REFILL_MS;
 
-    let stopTitle  = false;
-    let stopDesc   = false;
-    const deadline = Date.now() + REFILL_MS;
+      const loop=setInterval(()=>{
+        if(Date.now()>deadline){clearInterval(loop);return;}
+        if(!stopTitle && (!t.value.trim()||t.value.trim()===TEMPLATE_TITLE)){
+          nativeSet(t,payload.title||'');
+        }
+        const curTrim=d.value.replace(/\s+/g,' ').trim();
+        if(!stopDesc && (curTrim===TEMPLATE_DESC||curTrim.length<15)){
+          nativeSet(d,payload.desc||'');
+        }
+        if(stopTitle&&stopDesc)clearInterval(loop);
+      },REFILL_INT);
 
-    const stopLoop = id => { clearInterval(id); console.log('[TM] Refill loop ended'); };
+      t.addEventListener('input',e=>{if(e.isTrusted)stopTitle=true;},{once:true});
+      d.addEventListener('input',e=>{if(e.isTrusted)stopDesc =true;},{once:true});
+    });
 
-    /* stop when user types */
-    t.addEventListener('input', e => { if (e.isTrusted) stopTitle = true; }, { once: true });
-    d.addEventListener('input', e => { if (e.isTrusted) stopDesc  = true; }, { once: true });
+    const findCreateBtn=()=>[...document.querySelectorAll('button')].find(b=>/create ticket/i.test(b.textContent||''));
+    waitFor(findCreateBtn, () => {
+      const btn=findCreateBtn();
+      if(btn){ btn.addEventListener('click',()=>{/* marker already armed */},{once:true}); }
+    });
 
-    const loop = setInterval(() => {
-      if (Date.now() > deadline) return stopLoop(loop);
+    setTimeout(()=>{ if(key)GM_deleteValue(key); },30000);
+  }
 
-      /* -------- Title -------- */
-      const titleLooksTemplate = !t.value || t.value.trim() === TEMPLATE_TITLE;
-      if (!stopTitle && titleLooksTemplate) {
-        nativeSet(t, payload.title || '');
-      }
-
-      /* -------- Description -- */
-      const currentTrim   = d.value.replace(/\s+/g, ' ').trim();
-      const descLooksTpl  = currentTrim === TEMPLATE_DESC || currentTrim.length < 15;
-      if (!stopDesc && descLooksTpl) {
-        nativeSet(d, payload.desc || '');
-      }
-
-      if (stopTitle && stopDesc) stopLoop(loop);
-    }, REFILL_INT);
-  });
-
-  /* --- re‑arm when user clicks “Create ticket” ------------------------ */
-  const findCreateBtn = () =>
-    [...document.querySelectorAll('button')].find(b => /create ticket/i.test(b.textContent || ''));
-
-  waitFor(findCreateBtn, () => {
-    const btn = findCreateBtn();
-    if (btn) btn.addEventListener('click', armPost, { once: true });
-  });
-
-  /* cleanup stored payload */
-  setTimeout(() => { if (key) GM_deleteValue(key); }, 30_000);
-}
   /* ------------ SIM TICKET VIEW (Slack Post) ------------ */
   function sendToSlack(title, link){
     if (!SLACK_WEBHOOK) return;
-    console.log('[TM] Sending to Slack:', title, link);
     GM_xmlhttpRequest({
       method:'POST',
       url:SLACK_WEBHOOK,
       headers:{'Content-Type':'application/json'},
-      data:JSON.stringify({ title, url: link }),
+      data:JSON.stringify({ title, url:link }),
       onload:r=>{
-        console.log('[TM] Slack response', r.status, r.responseText);
         if(r.status===200){
           const toast=document.createElement('div');
           toast.textContent='✅ Posted to #tpa4-icqa-tt';
@@ -199,75 +170,64 @@ List Price - ${data.ListPrice||''}`;
           document.body.appendChild(toast);
           setTimeout(()=>toast.remove(),3000);
         }
-      },
-      onerror:e=>console.error('[TM] Slack error', e)
+      }
     });
   }
 
   function onSIMTicketView(){
-    const tid = location.pathname.match(/V\d+/)?.[0];
-    if (!tid) return;
+    const tid=location.pathname.match(/V\d+/)?.[0];
+    if(!tid)return;
 
-    const ts = GM_getValue(PENDING_KEY);
-    if (!ts || (Date.now() - ts) > POST_WINDOW_MS) {
-      console.log('[TM] Skip Slack post (no pending marker or too old)');
+    const armedKey=GM_getValue(PENDING_KEY);
+    const pageKey=q('tmk') || document.body.querySelector('[data-template-key]')?.dataset.templateKey || '';
+
+    if(!armedKey || armedKey!==pageKey){
+      console.log('[TM] Skip Slack post – no matching key');
       return;
     }
 
-    const sentKey = `sent_${tid}`;
-    if (GM_getValue(sentKey)) {
+    const sentKey=`sent_${tid}`;
+    if(GM_getValue(sentKey)){
       console.log('[TM] Already sent for', tid);
       return;
     }
 
-    const getTitle = () => {
-  const el =
-    document.querySelector('#ticket-title') ||               // edit form
-    document.querySelector('[data-testid="ticket-title"]') || // if SIM exposes one
-    document.querySelector('h1');                             // read-only view
+    const started=performance.timeOrigin||Date.now();
+    if(Date.now()-started>POST_WINDOW_MS){
+      console.log('[TM] Skip – window expired');
+      return;
+    }
 
-  let txt = (el?.value || el?.textContent || '').trim();
+    const getTitle=()=>{
+      const el=document.querySelector('#ticket-title')||
+               document.querySelector('[data-testid="ticket-title"]')||
+               document.querySelector('h1');
+      let txt=(el?.value||el?.textContent||'').trim();
+      return txt.replace(/^\s*\[?\d+\]?\s*/,'');
+    };
 
-  // remove a leading severity badge like "5 " or "[5] "
-  txt = txt.replace(/^\s*\[?\d+\]?\s*/, '');
-
-  return txt;
-};
-
-    const trySend = () => {
-      const title = getTitle();
-      console.log('[TM] Title found?', title);
-      if (title) {
-        sendToSlack(title, location.href);
-        GM_setValue(sentKey, true);
-        GM_deleteValue(PENDING_KEY);
+    const trySend=()=>{
+      const title=getTitle();
+      if(title){
+        sendToSlack(title,location.href);
+        GM_setValue(sentKey,true);
+        GM_deleteValue(PENDING_KEY);           // disarm
       }
     };
 
-    if (getTitle()) trySend();
-    else waitFor(() => !!getTitle(), trySend, 200, 50);
+    if(getTitle())trySend();
+    else waitFor(()=>!!getTitle(), trySend, 200, 50);
   }
 
-  /* ------------ ROUTING & SPA WATCH ------------ */
-  function routeNow() {
-    if (location.hostname.includes('fcresearch-na.aka.amazon.com')) {
-      onFC();
-    } else if (location.hostname.includes('t.corp.amazon.com')) {
-      if (/create\/copy/i.test(location.pathname)) onSIMCopy();
-      if (/\/V\d+/i.test(location.pathname))      onSIMTicketView();
+  /* ------------ ROUTER ------------ */
+  function routeNow(){
+    if(location.hostname.includes('fcresearch-na.aka.amazon.com')) onFC();
+    else if(location.hostname.includes('t.corp.amazon.com')){
+      if(/create\/copy/i.test(location.pathname)) onSIMCopy();
+      if(/\/V\d+/i.test(location.pathname))      onSIMTicketView();
     }
   }
-
   routeNow();
-
-  // Watch for client-side navigation
-  let lastPath = location.pathname;
-  setInterval(() => {
-    if (location.pathname !== lastPath) {
-      lastPath = location.pathname;
-      console.log('[TM] Path changed to', lastPath);
-      routeNow();
-    }
-  }, 500);
-
+  let lastPath=location.pathname;
+  setInterval(()=>{ if(location.pathname!==lastPath){ lastPath=location.pathname; routeNow(); } },500);
 })();
