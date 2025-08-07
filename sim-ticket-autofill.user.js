@@ -186,33 +186,44 @@ List Price - ${data.ListPrice}`;
   }
 
   function onSIMTicketView () {
-    const tid = location.pathname.match(/V\d+/)?.[0];
-    if (!tid) return;
+  // Abort if we’re still on the “create /copy” page
+  if (/\/create\/copy\//i.test(location.pathname)) return;
 
-    const armedKey = GM_getValue(PENDING_KEY);
-    if (!armedKey) return;
+  // Require a ticket-ID in the path (/V123456…)
+  const tid = location.pathname.match(/V\d+/)?.[0];
+  if (!tid) return;
 
-    const sentKey = `sent_${tid}`;
-    if (GM_getValue(sentKey)) return;
+  // ---------- existing key-matching & timing logic ----------
+  const armedKey = GM_getValue(PENDING_KEY);
+  const pageKey  = q('tmk') ||
+                   document.body.querySelector('[data-template-key]')?.dataset.templateKey ||
+                   '';
+  if (!armedKey || armedKey !== pageKey) return;
 
-    const getTitle = () => {
-      const el = document.querySelector('#ticket-title') ||
-                 document.querySelector('[data-testid="ticket-title"]') ||
-                 document.querySelector('h1');
-      return (el?.value || el?.textContent || '').trim().replace(/^\s*\[?\d+\]?\s*/, '');
-    };
+  const sentKey = `sent_${tid}`;
+  if (GM_getValue(sentKey)) return;
 
-    const trySend = () => {
-      const title = getTitle();
-      if (title) {
-        sendToSlack(title, location.href);
-        GM_setValue(sentKey, true);
-        GM_deleteValue(PENDING_KEY);
-      }
-    };
+  if (Date.now() - performance.timeOrigin > POST_WINDOW_MS) return;
 
-    getTitle() ? trySend() : waitFor(() => !!getTitle(), trySend, 200, 50);
-  }
+  // ---------- title lookup + Slack post ----------
+  const getTitle = () => {
+    const el = document.querySelector('#ticket-title') ||
+               document.querySelector('[data-testid="ticket-title"]') ||
+               document.querySelector('h1');
+    return (el?.value || el?.textContent || '').trim().replace(/^\s*\[?\d+\]?\s*/, '');
+  };
+
+  const push = () => {
+    const title = getTitle();
+    if (title) {
+      sendToSlack(title, location.href);
+      GM_setValue(sentKey, true);
+      GM_deleteValue(PENDING_KEY);            // disarm
+    }
+  };
+
+  getTitle() ? push() : waitFor(() => !!getTitle(), push, 200, 50);
+}
 
   /* ------------ ROUTER ------------ */
   function routeNow () {
