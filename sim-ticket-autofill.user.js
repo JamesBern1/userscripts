@@ -126,13 +126,22 @@ function onSIMCopy(){
 }
 
 /* -------------- SIM TICKET VIEW → POST TO SLACK -------------- */
-const sendSlack=(title,url)=>{
-  if(!SLACK_WEBHOOK) return;
-  GM_xmlhttpRequest({method:'POST',url:SLACK_WEBHOOK,
-    headers:{'Content-Type':'application/json'},
-    data:JSON.stringify({title,url})
+function sendSlack (title, url) {
+  if (!SLACK_WEBHOOK) return;
+  GM_xmlhttpRequest({
+    method:  'POST',
+    url:     SLACK_WEBHOOK,
+    headers: { 'Content-Type':'application/json' },
+    data:    JSON.stringify({ title, url }),
+    onload: r => {
+      if (r.status === 200) {
+        const t=document.createElement('div');
+        t.textContent='✅ Posted to #tpa4-icqa-tt'; Object.assign(t.style,{position:'fixed',bottom:'15px',right:'15px',background:'#2eb67d',color:'#fff',padding:'8px 12px',borderRadius:'4px',zIndex:99999,font:'12px Arial'}); document.body.appendChild(t); setTimeout(()=>t.remove(),3000);
+      }
+    }
   });
-};
+}
+
 
 function onSIMTicketView(){
   if(/\/create\/copy\//i.test(location.pathname)) return;
