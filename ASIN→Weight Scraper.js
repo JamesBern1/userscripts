@@ -1,6 +1,9 @@
 // ==UserScript==
 // @name         FCResearch • ASIN→Weight Scraper (stops when done)
 // @description  Paste one long string of 10-char ASINs; auto-search each, read Weight, and download one CSV — then STOP cleanly.
+// @namespace    https://github.com/JamesBern1/userscripts
+// @downloadURL  https://raw.githubusercontent.com/JamesBern1/userscripts/main/asin-weight-scraper.user.js
+// @updateURL    https://raw.githubusercontent.com/JamesBern1/userscripts/main/asin-weight-scraper.user.js
 // @version      1.5.0
 // @author       you
 // @match        https://fcresearch-na.amazon.com/*
